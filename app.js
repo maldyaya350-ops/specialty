@@ -3,6 +3,7 @@ const FAV_KEY = "pro_majors_favs";
 const AUTH_KEY = "pro_majors_auth_session";
 const USERS_KEY = "pro_majors_users";
 const SECURITY_KEY = "pro_majors_security";
+const ADMIN_LOG_KEY = "pro_majors_admin_log";
 const WARNING_NOTIF_KEY = "pro_majors_warning_notifications";
 const SYNC_CHANNEL = "pro_majors_live_sync";
 
@@ -10,6 +11,7 @@ const LOGIN_USERNAME = "maldyaya-admin";
 const LOGIN_PASSWORD = "015511";
 const ADMIN_SECRET_CODE = "mald-yaya-nour";
 const ADMIN_SECRET_SESSION_KEY = "pro_majors_admin_secret_ok";
+const IS_ADMIN_PAGE = window.location.pathname.toLowerCase().endsWith("/admin-secret.html");
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const LOCK_MS = 5 * 60 * 1000;
@@ -60,9 +62,16 @@ function applyExternalState(keys = []) {
 
     if (isAuthenticated()) {
         refreshAccessUI();
-        if (document.getElementById("app-root").style.display === "block") {
+        const appRoot = document.getElementById("app-root");
+        if (appRoot && appRoot.style.display === "block") {
             refreshUI();
         }
+    }
+
+    const adminPage = document.getElementById("admin-page");
+    if (adminPage && adminPage.style.display === "block") {
+        renderAdminTable();
+        renderAdminStats();
     }
 }
 
@@ -86,6 +95,11 @@ function saveAll() {
     localStorage.setItem(DB_KEY, JSON.stringify(db));
     localStorage.setItem(FAV_KEY, JSON.stringify([...favorites]));
     emitSync([DB_KEY, FAV_KEY]);
+}
+
+function saveDbOnly() {
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
+    emitSync([DB_KEY]);
 }
 
 function saveUsers() {
@@ -275,6 +289,7 @@ function isAdmin() {
 
 function refreshAccessUI() {
     const navAdmin = document.getElementById("nav-admin");
+    if (!navAdmin) return;
     if (!isAuthenticated()) {
         navAdmin.style.display = "none";
         return;
@@ -302,9 +317,12 @@ function validatePassword(password) {
 }
 
 function showOnly(section) {
-    document.getElementById("auth-gate").style.display = section === "auth" ? "flex" : "none";
-    document.getElementById("not-found-screen").style.display = section === "404" ? "flex" : "none";
-    document.getElementById("app-root").style.display = section === "app" ? "block" : "none";
+    const authGate = document.getElementById("auth-gate");
+    const notFound = document.getElementById("not-found-screen");
+    const appRoot = document.getElementById("app-root");
+    if (authGate) authGate.style.display = section === "auth" ? "flex" : "none";
+    if (notFound) notFound.style.display = section === "404" ? "flex" : "none";
+    if (appRoot) appRoot.style.display = section === "app" ? "block" : "none";
 }
 
 function parseRoute() {
@@ -409,9 +427,12 @@ async function createViewerAccount() {
 function logout() {
     sessionStorage.removeItem(AUTH_KEY);
     sessionStorage.removeItem(ADMIN_SECRET_SESSION_KEY);
-    document.getElementById("login-user").value = "";
-    document.getElementById("login-pass").value = "";
-    document.getElementById("login-pass-confirm").value = "";
+    const loginUser = document.getElementById("login-user");
+    const loginPass = document.getElementById("login-pass");
+    const loginPassConfirm = document.getElementById("login-pass-confirm");
+    if (loginUser) loginUser.value = "";
+    if (loginPass) loginPass.value = "";
+    if (loginPassConfirm) loginPassConfirm.value = "";
     showOnly("auth");
 }
 
@@ -425,6 +446,10 @@ function goSecretAdminPage() {
 }
 
 function goHome() {
+    if (IS_ADMIN_PAGE) {
+        window.location.href = "index.html#/home";
+        return;
+    }
     window.location.hash = "#/home";
     bootApp();
 }
@@ -550,21 +575,226 @@ function showDetails(id) {
 
 function closeModal(e) {
     if (!e || e.target.className === "modal-overlay") {
-        document.getElementById("modal").style.display = "none";
+        const modal = document.getElementById("modal");
+        if (modal) modal.style.display = "none";
     }
+}
+
+function setAdminSession() {
+    setSession(LOGIN_USERNAME, "admin");
+}
+
+function showAdminState(state) {
+    const login = document.getElementById("admin-login");
+    const unlock = document.getElementById("admin-unlock");
+    const page = document.getElementById("admin-page");
+    if (!login || !unlock || !page) return;
+    login.style.display = state === "login" ? "flex" : "none";
+    unlock.style.display = state === "unlock" ? "flex" : "none";
+    page.style.display = state === "page" ? "block" : "none";
+}
+
+function appendAdminLog(action, payload = "") {
+    const logs = parseJSON(ADMIN_LOG_KEY, []);
+    logs.unshift({
+        at: new Date().toISOString(),
+        action,
+        payload
+    });
+    localStorage.setItem(ADMIN_LOG_KEY, JSON.stringify(logs.slice(0, 200)));
+}
+
+function renderAdminStats() {
+    const usersList = parseJSON(USERS_KEY, []);
+    const security = parseJSON(SECURITY_KEY, { failedByUser: {} });
+    const failed = Object.values(security.failedByUser || {}).reduce((sum, item) => sum + (item.attempts || 0), 0);
+
+    const elMajors = document.getElementById("admin-stats-majors");
+    const elUsers = document.getElementById("admin-stats-users");
+    const elFails = document.getElementById("admin-stats-fails");
+    const elUpdated = document.getElementById("admin-stats-updated");
+    if (!elMajors || !elUsers || !elFails || !elUpdated) return;
+
+    elMajors.innerText = String(db.length);
+    elUsers.innerText = String(usersList.length);
+    elFails.innerText = String(failed);
+    elUpdated.innerText = new Date().toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderAdminTable() {
+    const adminBody = document.getElementById("admin-table-body");
+    if (!adminBody) return;
+    adminBody.innerHTML = db.map((m) => `
+        <tr>
+            <td><strong>${escapeHtml(m.name)}</strong></td>
+            <td><span class="category-tag">${escapeHtml(m.cat)}</span></td>
+            <td>
+                <button class="delete-btn" onclick="handle_Delete(${m.id})"><i class="fas fa-trash-alt"></i></button>
+            </td>
+        </tr>
+    `).join("");
+}
+
+function verifyAdminSecret() {
+    const inputEl = document.getElementById("admin-secret-input");
+    const err = document.getElementById("admin-unlock-error");
+    if (!inputEl || !err) return;
+    const input = inputEl.value.trim();
+    err.textContent = "";
+
+    if (input !== ADMIN_SECRET_CODE) {
+        err.textContent = "الكود السري غير صحيح.";
+        appendAdminLog("secret_fail");
+        return;
+    }
+    sessionStorage.setItem(ADMIN_SECRET_SESSION_KEY, ADMIN_SECRET_CODE);
+    appendAdminLog("secret_pass");
+    showAdminState("page");
+    renderAdminTable();
+    renderAdminStats();
+}
+
+function handleAdminLogin() {
+    const userEl = document.getElementById("admin-login-user");
+    const passEl = document.getElementById("admin-login-pass");
+    const secretEl = document.getElementById("admin-login-secret");
+    const err = document.getElementById("admin-login-error");
+    if (!userEl || !passEl || !secretEl || !err) return;
+
+    const user = userEl.value.trim();
+    const pass = passEl.value;
+    const secret = secretEl.value.trim();
+    err.textContent = "";
+
+    if (!user || !pass || !secret) {
+        err.textContent = "أدخلي بيانات الأدمن كاملة.";
+        return;
+    }
+    if (user !== LOGIN_USERNAME || pass !== LOGIN_PASSWORD || secret !== ADMIN_SECRET_CODE) {
+        err.textContent = "بيانات الأدمن غير صحيحة.";
+        appendAdminLog("admin_login_fail", user || "unknown");
+        return;
+    }
+
+    clearFailedAttempts(LOGIN_USERNAME);
+    setAdminSession();
+    sessionStorage.setItem(ADMIN_SECRET_SESSION_KEY, ADMIN_SECRET_CODE);
+    appendAdminLog("admin_login_success", user);
+    showAdminState("page");
+    renderAdminTable();
+    renderAdminStats();
+}
+
+function verifyAdminAccess() {
+    if (!isAuthenticated() || !isAdmin()) {
+        showAdminState("login");
+        return;
+    }
+    const secretOk = sessionStorage.getItem(ADMIN_SECRET_SESSION_KEY) === ADMIN_SECRET_CODE;
+    if (!secretOk) {
+        showAdminState("unlock");
+        return;
+    }
+    showAdminState("page");
+    renderAdminTable();
+    renderAdminStats();
+    refreshSessionTTL();
+}
+
+function handle_Add() {
+    if (!isAuthenticated() || !isAdmin()) {
+        showAdminState("login");
+        return;
+    }
+
+    const name = document.getElementById("m-name").value.trim();
+    const cat = document.getElementById("m-cat").value;
+    const desc = document.getElementById("m-desc").value.trim();
+
+    if (!name || !desc) {
+        alert("فضلاً أكملي جميع الحقول المطلوبة.");
+        return;
+    }
+
+    const exists = db.some((m) => normalizeText(m.name) === normalizeText(name));
+    if (exists) {
+        alert("هذا التخصص موجود بالفعل.");
+        return;
+    }
+
+    db.unshift({
+        id: Date.now(),
+        name,
+        cat,
+        desc,
+        salary: "غير محدد",
+        skills: "مهارات عامة"
+    });
+
+    saveDbOnly();
+    appendAdminLog("major_add", name);
+    renderAdminTable();
+    renderAdminStats();
+    document.getElementById("m-name").value = "";
+    document.getElementById("m-desc").value = "";
+}
+
+function handle_Delete(id) {
+    if (!isAuthenticated() || !isAdmin()) {
+        showAdminState("login");
+        return;
+    }
+
+    const item = db.find((m) => m.id === id);
+    if (!item) return;
+
+    if (confirm(`هل أنتِ متأكدة من حذف "${item.name}"؟`)) {
+        db = db.filter((m) => m.id !== id);
+        saveDbOnly();
+        appendAdminLog("major_delete", item.name);
+        renderAdminTable();
+        renderAdminStats();
+    }
+}
+
+function logoutAdmin() {
+    logout();
+    window.location.href = "index.html";
+}
+
+function initAdminSecretPage() {
+    verifyAdminAccess();
 }
 
 window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeModal();
-    if (e.key === "Enter" && document.getElementById("auth-gate").style.display === "flex") {
+
+    const authGate = document.getElementById("auth-gate");
+    if (e.key === "Enter" && authGate && authGate.style.display === "flex") {
         handleLogin();
+    }
+
+    const adminLogin = document.getElementById("admin-login");
+    if (e.key === "Enter" && adminLogin && adminLogin.style.display === "flex") {
+        handleAdminLogin();
+    }
+
+    const adminUnlock = document.getElementById("admin-unlock");
+    if (e.key === "Enter" && adminUnlock && adminUnlock.style.display === "flex") {
+        verifyAdminSecret();
     }
 });
 
-window.addEventListener("hashchange", bootApp);
+window.addEventListener("hashchange", () => {
+    if (!IS_ADMIN_PAGE) bootApp();
+});
 ["click", "keydown", "mousemove", "touchstart"].forEach((evt) => {
     window.addEventListener(evt, refreshSessionTTL, { passive: true });
 });
 
 setupRealtimeSync();
-bootApp();
+if (IS_ADMIN_PAGE) {
+    initAdminSecretPage();
+} else {
+    bootApp();
+}
