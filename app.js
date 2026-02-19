@@ -11,7 +11,6 @@ const LOGIN_USERNAME = "maldyaya-admin";
 const LOGIN_PASSWORD = "015511";
 const ADMIN_SECRET_CODE = "mald-yaya-nour";
 const ADMIN_SECRET_SESSION_KEY = "pro_majors_admin_secret_ok";
-const IS_ADMIN_PAGE = window.location.pathname.toLowerCase().endsWith("/admin-secret.html");
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const LOCK_MS = 5 * 60 * 1000;
@@ -44,6 +43,10 @@ const syncChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChann
 function emitSync(keys) {
     if (!syncChannel) return;
     syncChannel.postMessage({ keys, at: nowMs() });
+}
+
+function setLocalJSON(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
 }
 
 function applyExternalState(keys = []) {
@@ -92,23 +95,23 @@ function setupRealtimeSync() {
 }
 
 function saveAll() {
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-    localStorage.setItem(FAV_KEY, JSON.stringify([...favorites]));
+    setLocalJSON(DB_KEY, db);
+    setLocalJSON(FAV_KEY, [...favorites]);
     emitSync([DB_KEY, FAV_KEY]);
 }
 
 function saveDbOnly() {
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
+    setLocalJSON(DB_KEY, db);
     emitSync([DB_KEY]);
 }
 
 function saveUsers() {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+    setLocalJSON(USERS_KEY, users);
     emitSync([USERS_KEY]);
 }
 
 function saveSecurity() {
-    localStorage.setItem(SECURITY_KEY, JSON.stringify(securityState));
+    setLocalJSON(SECURITY_KEY, securityState);
     emitSync([SECURITY_KEY]);
 }
 
@@ -326,7 +329,7 @@ function showOnly(section) {
 }
 
 function parseRoute() {
-    const allowedRoutes = new Set(["", "/", "home"]);
+    const allowedRoutes = new Set(["", "/", "home", "admin"]);
     const path = window.location.pathname.toLowerCase();
     if (!(path.endsWith("/") || path.endsWith("/index.html"))) return { valid: false };
     const rawHash = (window.location.hash || "").replace(/^#\/?/, "").toLowerCase();
@@ -362,7 +365,7 @@ async function handleLogin() {
         if (pass !== LOGIN_PASSWORD) {
             triggerAdminBreachAlert(user);
         }
-        err.textContent = "دخول الأدمن من صفحة الأدمن فقط.";
+        err.textContent = "دخول الأدمن من نافذة الأدمن الخاصة فقط.";
         return;
     }
 
@@ -437,19 +440,30 @@ function logout() {
 }
 
 function goToAdminLogin() {
-    window.location.href = "admin-secret.html";
+    openAdminWindow();
 }
 
 function goSecretAdminPage() {
     if (!guardAuth()) return;
-    window.location.href = "admin-secret.html";
+    openAdminWindow();
+}
+
+function openAdminWindow() {
+    const adminUrl = `${window.location.href.split("#")[0]}#/admin`;
+    const popup = window.open(
+        adminUrl,
+        "adminPortalWindow",
+        "width=1100,height=760,menubar=no,toolbar=no,location=yes,status=no,resizable=yes,scrollbars=yes"
+    );
+    if (popup) {
+        popup.focus();
+        return;
+    }
+    window.location.hash = "#/admin";
+    bootApp();
 }
 
 function goHome() {
-    if (IS_ADMIN_PAGE) {
-        window.location.href = "index.html#/home";
-        return;
-    }
     window.location.hash = "#/home";
     bootApp();
 }
@@ -460,6 +474,13 @@ function bootApp() {
         showOnly("404");
         return;
     }
+    if (route.route === "admin") {
+        showOnly("app");
+        const userApp = document.getElementById("user-app");
+        if (userApp) userApp.style.display = "none";
+        verifyAdminAccess();
+        return;
+    }
     if (!isAuthenticated()) {
         showOnly("auth");
         return;
@@ -467,6 +488,10 @@ function bootApp() {
     refreshAccessUI();
     refreshSessionTTL();
     showOnly("app");
+
+    const userApp = document.getElementById("user-app");
+    if (userApp) userApp.style.display = "block";
+    showAdminState("hidden");
     toggleApp("user", true);
 }
 
@@ -759,11 +784,7 @@ function handle_Delete(id) {
 
 function logoutAdmin() {
     logout();
-    window.location.href = "index.html";
-}
-
-function initAdminSecretPage() {
-    verifyAdminAccess();
+    window.location.hash = "#/home";
 }
 
 window.addEventListener("keydown", (e) => {
@@ -785,16 +806,10 @@ window.addEventListener("keydown", (e) => {
     }
 });
 
-window.addEventListener("hashchange", () => {
-    if (!IS_ADMIN_PAGE) bootApp();
-});
+window.addEventListener("hashchange", bootApp);
 ["click", "keydown", "mousemove", "touchstart"].forEach((evt) => {
     window.addEventListener(evt, refreshSessionTTL, { passive: true });
 });
 
 setupRealtimeSync();
-if (IS_ADMIN_PAGE) {
-    initAdminSecretPage();
-} else {
-    bootApp();
-}
+bootApp();
